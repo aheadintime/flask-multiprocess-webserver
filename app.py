@@ -4,6 +4,41 @@ from multiprocessing import Process, Queue
 
 import subprocess
 
+import re 
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+import base64
+import os
+
+plt.style.use('_mpl-gallery')
+matplotlib.use('agg')
+
+ms_lists = []
+
+
+def standard_handler(i, q):
+    return "<p/>".join(dump_queue(q))
+
+def regex_handler(i, q):
+    items = dump_queue(q)
+
+    for item in items:
+        x = re.search("(.*?) (.*?): (.*?)=(.*?) (.*?)=(.*?)ms (.*?)=(.*?)\n", item + "\n")
+        if(x == None):
+            continue
+        
+        ms = int(x.group(6))
+
+        while len(ms_lists) < i + 1:
+            ms_lists.append([])
+
+        ms_lists[i].append(ms)
+
+    return plot_to_image_base64(ms_lists[i]) + "<p>" + "<p/>".join(items)
+
+
+
 def run_process_with_queue(q, a):
     proc = subprocess.Popen(a,stdout=subprocess.PIPE)
     while True:
@@ -18,13 +53,14 @@ refresh_time = 5 #HTML PAGE REFRESH TIME (in seconds)
 
 commands = [
     ["ping 8.8.8.8", #COMMAND TITLE
-     ['ping','-t', '8.8.8.8']], #COMMAND
+     ['ping','-t', '8.8.8.8'], #COMMAND
+     regex_handler #HANDLE DATA TO SHOW IN HTML
+     ], 
 
     ["ping 8.8.4.4", 
-     ['ping','-t', '8.8.4.4']],
-
-    ["ping 208.67.222.222", 
-     ['ping', '-t', '208.67.222.222']]
+     ['ping','-t', '8.8.4.4'],
+     regex_handler
+     ],
 ]
 
 helpers = [] #USED TO STORE PROCESS AND QUEUE
@@ -68,7 +104,7 @@ def html_body(i):
         return "<p>Waiting...</p>"
     
     
-    return "<p>" + "<p/>".join(dump_queue(q)) + "</p>"
+    return "<p>" + commands[i][2](i, q) + "</p>"
 
 
 def with_title(title, body):
@@ -79,4 +115,24 @@ def dump_queue(q):
     while(not q.empty()):
         items.append(q.get(block=False))
     return items
-    
+
+def plot_to_image_base64(data):
+    fig, ax = plt.subplots()
+
+    ax.stairs(data, linewidth=2.5)
+
+    ax.set(xlim=(0, len(data)), xticks=[],
+       ylim=(0, max(data) * 2), yticks=[])
+
+    plt.savefig('temp.png')
+
+    plt.close()
+
+    graph_png = ""
+
+    with open("temp.png", "rb") as image_file:
+        graph_png = base64.b64encode(image_file.read()).decode('utf-8')
+
+    os.remove("temp.png") 
+
+    return "<img src=\"data:image/png;base64," + graph_png + "\"/>"
